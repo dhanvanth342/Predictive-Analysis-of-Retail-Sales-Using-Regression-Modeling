@@ -1,0 +1,444 @@
+---
+title: "Math 564 Project"
+author: "V. V. Dhanvanthar M. [A20543395],
+        Anjali Tavare [A20550996]"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r}
+#Libraries required:
+library(dplyr)
+library(tidyr)
+library(stats)
+library(lmtest)
+library(car)
+library(ggplot2)
+```
+
+#Loading the Dataset from local directory 
+
+```{r}
+data <- read.csv("D:/3rd_sem/Math564/Project/train.csv")
+
+head(data) # to view the first 5 instances of the dataset
+#View(data) # to view the complete data frame in a new window
+
+```
+## EDA [Exploratory Data Analysis]
+Lets analyze the data frame, check for presence of missing values, perform data cleaning, data imputation and handle the categorical variables.
+
+```{r}
+summary(data)
+```
+The summary of the data helps us to understand each variables data type, where in case of integers, It helps to find the min, max, 3 quartiles, mean and presence of NA's in each predictor. 
+
+## Dataset Preparation and Cleaning
+```{r}
+#Function to count missing values in each column (considering NA, empty strings, and "N/A")
+missing_count <- sapply(data, function(x) sum(is.na(x) | x == "" | x == "N/A" | x == "NULL"))
+
+# Convert the result to a data frame for easier viewing
+missing_count_df <- data.frame(Column = names(missing_count), Missing_Count = missing_count)
+
+# Display the result
+print(missing_count_df)
+```
+Item weight is having 1463 of N/A values while Outlet_Size is having 2410 missing values.
+Lets perform Data imputation using mean and mode for the missing values in Item_weight and Outlet_size respectively. 
+
+```{r}
+### 1. Handling Missing Values ###
+
+# Fill missing 'Item_Weight' with the mean weight
+data$Item_Weight[is.na(data$Item_Weight)] <- mean(data$Item_Weight, na.rm = TRUE)
+
+# Calculate the mode (most common value) of 'Outlet_Size'
+mode_outlet_size <- names(which.max(table(na.omit(data$Outlet_Size))))
+
+# Replace empty strings in 'Outlet_Size' with the mode value 'mode_outlet_size'
+data$Outlet_Size[data$Outlet_Size == ""] <- mode_outlet_size
+
+```
+
+# Cheking for missing values after data imputation
+```{r}
+#Function to count missing values in each column (considering NA, empty strings, and "N/A")
+missing_count <- sapply(data, function(x) sum(is.na(x) | x == "" | x == "N/A" | x == "NULL"))
+
+# Convert the result to a data frame for easier viewing
+missing_count_df <- data.frame(Column = names(missing_count), Missing_Count = missing_count)
+
+# Display the result
+print(missing_count_df)
+```
+We can clearly see there are no missing values in any of the attributes. 
+
+
+```{r}
+# Calculate the number of unique values in each column
+unique_values <- sapply(data, function(x) length(unique(x)))
+
+# Convert the result to a data frame
+unique_values_df <- data.frame(Column = names(unique_values), Unique_values = unique_values)
+# Display the result
+print(unique_values_df)
+```
+The number of unique values gives understanding on choosing methods to encode the categorical variables.
+
+```{r}
+cat("The unique elements in Item Fat Content is: ", unique(data$Item_Fat_Content))
+print("\n")
+cat("The unique elements in Outlet type is:", unique(data$Outlet_Type))
+print("\n")
+cat("The unique elements in Outlet location type is: ", unique(data$Outlet_Location_Type))
+```
+ 
+
+```{r}
+cat("The unique elements in Item Fat Content is: ", unique(data$Item_Fat_Content))
+print("\n")
+
+```
+
+In the case of Item Fat Content there are 5 classes mentioned "Low Fat Regular low fat LF reg" but in real theres only 2 namely Low Fat and Regular. Let Standardize these levels in Fat content variable. 
+```{r}
+# Standardize all levels in Item_Fat_Content
+
+data <- data %>%
+  mutate(Item_Fat_Content = case_when(
+    Item_Fat_Content == "LF" ~ "Low Fat",
+    Item_Fat_Content == "low fat" ~ "Low Fat",
+    Item_Fat_Content == "Low Fat" ~ "Low Fat",
+    Item_Fat_Content == "reg" ~ "Regular",
+    Item_Fat_Content == "Regular" ~ "Regular",
+    TRUE ~ Item_Fat_Content  # Preserving any values not specified above
+  ))
+
+# Convert to ordered factor and then numeric, if needed
+data$Item_Fat_Content <- factor(data$Item_Fat_Content, levels = c("Low Fat", "Regular"), ordered = TRUE)
+#data$Item_Fat_Content <- as.numeric(data$Item_Fat_Content)
+
+# Check unique values after standardization
+unique(data$Item_Fat_Content)
+```
+
+In this case we have observed 7 categorical variables namely:
+Item_Identifier, Item_Type, Outlet_Identifier, Item Fat Content, Outlet Size, Outlet Type, Outlet Location Type.
+We have performed 3 different encoding techniques for categoricals: 
+
+# i) Target Encoding for Item_Identifier, Item_Type, and Outlet_Identifier:
+
+Explanation: These fields may not have intrinsic numerical meaning, but they may impact the target variable, Item_Outlet_Sales. By target encoding, you assign the mean sales value associated with each unique identifier, effectively capturing its impact on the target without adding excessive dimensionality.
+
+```{r}
+# Perform target encoding by calculating the mean of 'Item_Outlet_Sales' for each category
+
+data <- data %>%
+  group_by(Item_Identifier) %>%
+  mutate(Item_Identifier_Encoded = mean(Item_Outlet_Sales, na.rm = TRUE)) %>%
+  ungroup() %>%
+  group_by(Item_Type) %>%
+  mutate(Item_Type_Encoded = mean(Item_Outlet_Sales, na.rm = TRUE)) %>%
+  ungroup() %>%
+  group_by(Outlet_Identifier) %>%
+  mutate(Outlet_Identifier_Encoded = mean(Item_Outlet_Sales, na.rm = TRUE)) %>%
+  ungroup()
+
+# Optionally, remove the original columns after encoding
+data <- data %>% select(-Item_Identifier, -Item_Type, -Outlet_Identifier)
+```
+
+
+# ii) Ordinal Encoding for Item_Fat_Content and Outlet_Size:
+
+Explanation: These fields represent categorical values that have some inherent order or quantifiable property, making ordinal encoding suitable.
+
+```{r}
+# Convert each categorical variable to a factor with specified levels for ordinal encoding
+
+# Item_Fat_Content: Assuming "Low Fat" < "Regular"
+data$Item_Fat_Content <- as.numeric(data$Item_Fat_Content)
+
+# Outlet_Size: Assuming "Small" < "Medium" < "High"
+data$Outlet_Size <- factor(data$Outlet_Size, levels = c("Small", "Medium", "High"), ordered = TRUE)
+data$Outlet_Size <- as.numeric(data$Outlet_Size)
+
+```
+
+# iii) One-Hot Encoding for Outlet_Type and Outlet_Location_Type:
+
+Explanation: These fields represent categorical variables with a small number of distinct levels, where each level is unique but unordered. One-hot encoding works well because it captures the categorical nature without assuming any ordinal relationship. 
+We apply one-hot encoding following the principle where a categorical variable with c classes will be represented by c−1 indicator variables, so that we eliminate the correlation betweent he variables. 
+
+```{r}
+
+# Performing one-hot encoding for 'Outlet_Type' and 'Outlet_Location_Type' with c - 1 indicator variables
+data <- data %>%
+  # Convert to factor if not already
+  mutate(Outlet_Type = factor(Outlet_Type),
+         Outlet_Location_Type = factor(Outlet_Location_Type)) %>%
+  # Apply model.matrix to generate dummy variables, excluding one level for each factor
+  cbind(
+    model.matrix(~ Outlet_Type - 1, data = .)[, -1],  # Removing the first level of 'Outlet_Type'
+    model.matrix(~ Outlet_Location_Type - 1, data = .)[, -1]  # Removing the first level of 'Outlet_Location_Type'
+  ) %>%
+  # Drop the original columns
+  select(-Outlet_Type, -Outlet_Location_Type)
+
+```
+
+```{r}
+head(data)
+```
+So in this case if Outlet_TypeSupermarket Type1, Outlet_TypeSupermarket Type2, Outlet_TypeSupermarket Type3 are 0's, then it indicates the outlet type is General store. Same goes with Outlet location where if Tier 2 and Tier 3 are 0's then the sample belongs to Tier 1. 
+
+```{r}
+#Function to count missing values in each column (considering NA, empty strings, and "N/A")
+missing_count <- sapply(data, function(x) sum(is.na(x) | x == "" | x == "N/A" | x == "NULL"))
+
+# Convert the result to a data frame for easier viewing
+missing_count_df <- data.frame(Column = names(missing_count), Missing_Count = missing_count)
+
+# Display the result
+
+print(missing_count_df)
+```
+
+```{r}
+# Remove spaces in column names by replacing them with underscores
+colnames(data) <- gsub(" ", "_", colnames(data))
+
+# Check the updated column names
+colnames(data)
+```
+
+
+```{r}
+summary(data)
+```
+
+
+``` {r}
+
+# Define and fit a linear regression model with updated column names
+model <- lm(Item_Outlet_Sales ~ Item_Weight + Item_Fat_Content + Item_Visibility + Item_MRP +
+              Outlet_Size + Item_Identifier_Encoded + Item_Type_Encoded + Outlet_Identifier_Encoded
+             + Outlet_TypeSupermarket_Type1 + Outlet_TypeSupermarket_Type2 + Outlet_TypeSupermarket_Type3
+               + Outlet_Location_TypeTier_2 + Outlet_Location_TypeTier_3,
+            data = data)
+
+# Summary of the model
+summary(model)
+```
+## Interpreting the regression Coefficients 
+Predictors with Positive Impact on Item_Outlet_Sales
+Item_Fat_Content: Coefficient = 9.864 (p = 0.679)
+Item_MRP: Coefficient = 3.411, significant (p < 0.001)
+Outlet_Size: Coefficient = 34.46 (p = 0.310)
+Item_Identifier_Encoded: Coefficient = 0.7818, highly significant (p < 0.001)
+Outlet_Location_Type (Tier_2): Coefficient = 5.133 (p = 0.868)
+Interpretation: Among these, only Item_MRP and Item_Identifier_Encoded significantly impact Item_Outlet_Sales, with higher values correlating to increased sales. Other positive coefficients are non-significant and don’t meaningfully predict sales.
+
+Predictors with Negative Impact on Item_Outlet_Sales
+Item_Weight: Coefficient = -0.205 (p = 0.939)
+Item_Visibility: Coefficient = -114.1 (p = 0.619)
+Item_Type_Encoded: Coefficient = -0.04893 (p = 0.616)
+Outlet_Location_Type (Tier_3): Coefficient = -56.51 (p = 0.321)
+Interpretation: None of these predictors significantly impact Item_Outlet_Sales, and their negative coefficients suggest slight decreases in sales, though they lack practical influence.
+
+Categorical Predictors (Effects of Outlet Types and Locations)
+Outlet_TypeSupermarket_Type1, Type2, Type3: All coefficients range from -102.2 to -142.9 (p-values > 0.7)
+Outlet_Location_Type:
+Tier_2: Coefficient = 5.133 (p = 0.868)
+Tier_3: Coefficient = -56.51 (p = 0.321)
+Interpretation: Categorical variables like outlet types and locations have non-significant impacts when compared to their baseline categories (Outlet_TypeGrocery_Store and Outlet_Location_TypeTier_1). This implies that, on average, these categories do not significantly differentiate sales.
+
+## Evaluating p-values:
+Significant Predictors:
+
+The most significant predictors in this model are Item_MRP, Item_Identifier_Encoded, and Outlet_Identifier_Encoded. Higher prices (MRP) are associated with higher sales, while specific items and outlets play substantial roles in predicting Item_Outlet_Sales.
+
+Non-significant Predictors:
+
+Predictors like Item_Weight, Item_Fat_Content, and Outlet_Size are not significant, suggesting they do not substantially impact sales and could be removed for model simplification.
+
+## Goodness-of-Fit Metrics
+
+R-squared (R² = 0.6258):
+This value indicates that approximately 62.6% of the variance in Item_Outlet_Sales can be explained by the model's predictors. While this is a moderately strong fit, it also suggests that around 37.4% of the variance in sales remains unexplained, which could imply the need for additional predictors or a different model form.
+
+Adjusted R-squared (Adjusted R² = 0.6252):
+The adjusted R-squared, slightly lower than R², corrects for the number of predictors. Since it’s close to R², it indicates that most predictors contribute meaningfully to the model, though some variables with high p-values may be removed without significantly affecting the fit.
+
+Finding the Confidence Interval of every predictor: 
+
+```{r}
+# Confidence intervals for each predictor
+conf_intervals <- confint(model)
+print(conf_intervals)
+```
+Predictors like Item_MRP, Item_Identifier_Encoded, and Outlet_Identifier_Encoded have confidence intervals that do not cross zero, confirming their significant positive impact on Item_Outlet_Sales.
+Variables with intervals crossing zero (e.g., Item_Weight, Item_Visibility, Outlet_Size) are unreliable predictors, aligning with their non-significant p-values. This suggests that only a few predictors meaningfully contribute to explaining variance in Item_Outlet_Sales. 
+
+## 3 Regression Diagnostics (Part II): Model Assumptions and Issues
+
+# Autocorrelation:
+
+```{r}
+# Perform Durbin-Watson test for autocorrelation
+durbin_watson_test <- dwtest(model)
+print(durbin_watson_test)
+```
+
+DW (Durbin-Watson Statistic): The test statistic value is 2.0134. In the Durbin-Watson test, values around 2 indicate that there is little to no autocorrelation in the residuals. Values close to 0 suggest positive autocorrelation, while values close to 4 suggest negative autocorrelation. Since our DW value is very close to 2, it indicates that autocorrelation is not likely present.
+
+p-value = 0.7603: A high p-value (above 0.05) suggests that there is no significant evidence of autocorrelation. In this case, the p-value of 0.7603 means that we do not reject the null hypothesis, which states that there is no autocorrelation in the residuals
+
+
+# Heteroscedasticity: 
+
+
+```{r}
+plot(model)
+
+# Calculate fitted values and residuals
+data$fitted <- fitted(model) 
+data$residuals <- resid(model)
+
+# plot histogram of residuals
+ggplot(data, aes(x = residuals)) +
+  geom_histogram(binwidth = 1, fill = 'blue', color = 'black', alpha =0.7) +
+  labs(title = "Histogram of Residuals",
+       x = 'Residuals',
+       y = 'Frequency') +
+  theme_minimal()
+```
+# Residuals vs Fitted
+A random scatter suggests that the assumption of linearity (between predictors and the response) is met, and the model is likely appropriate.
+
+If the residuals are either growing in positive or negative y-axis then we could conclude the presence of Heteroscedasticity. In this case there, the residuals are randomly scattered which indicates the variance of residuals do not depend on X.
+
+# Q-Q Residuals:
+
+# Scale-Location:
+
+# Residuals vs Leverage: 
+
+# Histogram of Residuals: 
+
+## Multicollinearity:
+```{r}
+# Calculate VIF for each predictor
+vif_values <- vif(model)
+print(vif_values)
+```
+The Variance Inflation Factor (VIF) values help assess multicollinearity in the model, where a VIF above 10 often indicates high multicollinearity. Here’s an interpretation of the VIF results:
+
+# Low VIF (1–4 range): These predictors show minimal multicollinearity.
+
+Item_Weight (1.00), Item_Fat_Content (1.01), Item_Visibility (1.09), Item_Type_Encoded (1.02): Very low VIF, indicating negligible multicollinearity.
+Outlet_Location_TypeTier_2 (1.63): Low multicollinearity, 
+Outlet_Size (3.24): Moderate multicollinearity, but acceptable.
+
+# Moderate VIF (4–6):
+
+Item_MRP (4.16), Item_Identifier_Encoded (4.19): Moderate multicollinearity, but generally acceptable.
+Outlet_Location_TypeTier_3 (6.05): Slightly higher but still manageable multicollinearity.
+
+#High VIF (10+): These predictors indicate strong multicollinearity and may be redundant in the model.
+
+Outlet_Identifier_Encoded (230.35): Very high VIF, indicating significant collinearity.
+Outlet_TypeSupermarket_Type1 (305.42), Outlet_TypeSupermarket_Type2 (88.69), Outlet_TypeSupermarket_Type3 (361.60): Extremely high VIFs suggest these outlet types are highly collinear with each other or other variables.
+
+
+## Influential Points: 
+
+```{r}
+# Cook's Distance plot
+cooksD <- cooks.distance(model)
+plot(cooks.distance(model), type = "h", main = "Cook's Distance", ylab = "Cook's Distance")
+
+#finding influential points using cooks distance:
+threshold <- 4/nrow(data)
+influential_points <- which(cooksD > threshold)
+#print(influential_points)
+# Leverage values
+leverage_values <- hatvalues(model)
+
+# Plot leverage values to check for high leverage points
+plot(leverage_values, main = "Leverage Values", ylab = "Leverage")
+abline(h = 2 * mean(leverage_values), col = "red", lty = 2)
+
+
+```
+
+# Cooks Distance:
+Points with a Cook's Distance value significantly higher than the average or greater than 1 are usually flagged as influential.
+In this plot, most data points have very low Cook's Distance values, suggesting they are not highly influential.
+
+
+# Leverage Values: 
+
+Leverage Threshold: Typically, a rule of thumb is to consider points with leverage values significantly higher than (2p/n) where p is the number of predictors and n is the number of observations. Observations above this threshold are often flagged as having high leverage. In this plot, Points above the red dashed line (around 0.003) are considered high-leverage points but cooks distance suggest they are not Influential Points.
+
+# Describe how each diagnostic affects the interpretation of your regression model.
+
+From the regression diagnostics conducted on the model, we identified two major issues: 
+a.High VIFs, which indicate multicollinearity among predictors. This affects model interpretation in the following ways:
+
+1. Unstable Coefficients
+High multicollinearity makes coefficients sensitive to minor data changes, causing instability in the direction and size of relationships, which reduces confidence in interpreting individual predictors.
+2. Difficulty in Isolating Effects
+With high VIFs, it's hard to determine each predictor's unique contribution. For example, if Outlet_Identifier_Encoded and Outlet_Type categories are highly collinear, their effects overlap, reducing clarity about their individual impact on Item_Outlet_Sales.
+
+b. Heteroscedasticity
+
+We will address this issue by removing Outlet_TypeSupermarket_Type1, Outlet_TypeSupermarket_Type2, and Outlet_TypeSupermarket_Type3 since these are highly collinear predictors. We have not removed the Outlet_Identifier_Encoded since its p-score has proven the feature is significant.
+
+ 
+
+## 4 Remediation (Part III): Addressing Model Issues
+
+```{r}
+# In order to control the effect of heteroscedasticity we are applying log transformation to the dependent variable
+data$Log_Item_Outlet_Sales <- log(data$Item_Outlet_Sales)
+
+# Fit the linear model with the log-transformed dependent variable and  
+# removed Outlet_TypeSupermarket_Type1, Outlet_TypeSupermarket_Type2, and Outlet_TypeSupermarket_Type3 
+model <- lm(Log_Item_Outlet_Sales ~ Item_Weight + Item_Fat_Content + Item_Visibility + Item_MRP +
+              Outlet_Size + Item_Identifier_Encoded + Item_Type_Encoded + Outlet_Identifier_Encoded +
+              Outlet_Location_TypeTier_2 + Outlet_Location_TypeTier_3,
+            data = data)
+# Summarize the new model
+summary(model)
+
+# Check residuals to assess if heteroscedasticity has been reduced
+#par(mfrow = c(2, 2))  # Set up plot layout
+plot(model)  # Diagnostic plots to evaluate model fit and residuals
+
+```
+Clearly the performance has increased in terms of explained variance of target variable by predictor variables from 0.6256 to 0.7191 [Adjusted R-square] and RSE reduced to 0.5394. In this case there are only 3 variables which are non-significant that is having p-score greater than 0.05 namely Item weight, Item fat content and Item type encoded. To reduce the complexity of the model we will remove these 3 variables and check for model performance. 
+
+
+
+
+```{r}
+
+model <- lm(Log_Item_Outlet_Sales ~ Item_Visibility + Item_MRP +
+              Outlet_Size + Item_Identifier_Encoded + Outlet_Identifier_Encoded +
+              Outlet_Location_TypeTier_2 + Outlet_Location_TypeTier_3,
+            data = data)
+
+summary(model)
+```
+
+
+```{r}
+# Calculating VIF for each predictor after high collinear feature removal:
+vif_values <- vif(model)
+print(vif_values)
+
+```
+Well now we can clearly observe none of the VIF values are above 4.2 which suggests we have clearly reduced the impact of collinearity in the model, suggesting the removed features successfully reduced redundancy. 
